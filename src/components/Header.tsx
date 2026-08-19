@@ -13,7 +13,7 @@ export const Header = () => {
         </Group>
 
         <Group gap="xl">
-          <Anchor component={Link} to="/vacancies" className={styles.menuLink}>
+          <Anchor component={Link} to="/vacancies/moscow" className={styles.menuLink}>
             Вакансии FE
           </Anchor>
           <Button

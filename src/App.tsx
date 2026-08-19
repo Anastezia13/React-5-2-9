@@ -9,25 +9,33 @@ import {
   MantineProvider,
   Pagination,
   Stack,
+  Tabs,
   Text,
   TextInput,
   createTheme,
 } from '@mantine/core';
 import { IconSearch } from '@tabler/icons-react';
-import { useEffect, useRef } from 'react';
 import { useDebouncedValue } from '@mantine/hooks';
-import { Navigate, Route, Routes, useSearchParams } from 'react-router-dom';
+import { useEffect, useRef } from 'react';
+import {
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useNavigate,
+  useSearchParams,
+} from 'react-router-dom';
 import { Filters } from './components/Filters';
 import { Header } from './components/Header';
 import { JobCard } from './components/JobCard';
 import { useAppDispatch, useAppSelector } from './hooks/redux';
 import { JobDetailsPage } from './pages/JobDetailsPage';
+import { NotFoundPage } from './pages/NotFoundPage';
 import { fetchJobs } from './store/jobsSlice';
 import {
   addSkill,
   hydrateFilters,
   removeSkill,
-  setCity,
   setPage,
   setSearch,
   type FiltersState,
@@ -39,7 +47,14 @@ const theme = createTheme({
   primaryColor: 'blue',
 });
 
-const getFiltersFromUrl = (params: URLSearchParams): FiltersState => {
+const cityRoutes = {
+  moscow: 'Москва',
+  petersburg: 'Санкт-Петербург',
+} as const;
+
+type CityRoute = keyof typeof cityRoutes;
+
+const getFiltersFromUrl = (params: URLSearchParams, city: string): FiltersState => {
   const requestedPage = Number(params.get('page'));
   const skills = (params.get('skills') ?? '')
     .split(',')
@@ -48,7 +63,7 @@ const getFiltersFromUrl = (params: URLSearchParams): FiltersState => {
 
   return {
     search: params.get('search') ?? '',
-    city: params.get('city') ?? 'Все',
+    city,
     skills: [...new Set(skills)],
     page: Number.isInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1,
   };
@@ -61,38 +76,52 @@ const areFiltersEqual = (left: FiltersState, right: FiltersState) =>
   left.skills.length === right.skills.length &&
   left.skills.every((skill, index) => skill === right.skills[index]);
 
-const getUrlFromFilters = ({ search, city, skills, page }: FiltersState) => {
+const getUrlFromFilters = ({ search, skills, page }: FiltersState) => {
   const params = new URLSearchParams();
 
   if (search) params.set('search', search);
-  if (city !== 'Все') params.set('city', city);
   if (skills.length > 0) params.set('skills', skills.join(','));
   if (page > 1) params.set('page', String(page));
 
   return params;
 };
 
-const VacanciesPage = () => {
+interface CityVacanciesPageProps {
+  cityRoute: CityRoute;
+}
+
+const CityVacanciesPage = ({ cityRoute }: CityVacanciesPageProps) => {
   const dispatch = useAppDispatch();
+  const navigate = useNavigate();
+  const location = useLocation();
   const { items, loading, error, pages } = useAppSelector((state) => state.jobs);
   const filters = useAppSelector((state) => state.filters);
   const [searchParams, setSearchParams] = useSearchParams();
   const queryString = searchParams.toString();
   const [debouncedSearch] = useDebouncedValue(filters.search, 300);
-  const initialUrlFiltersRef = useRef(getFiltersFromUrl(searchParams));
+  const filtersRef = useRef(filters);
+  const urlFiltersRef = useRef(getFiltersFromUrl(searchParams, cityRoutes[cityRoute]));
   const isHydratingFromUrlRef = useRef(true);
   const skillsKey = filters.skills.join('\u0000');
+  const activeCity = cityRoutes[cityRoute];
 
   useEffect(() => {
-    // При прямом открытии ссылки query-параметры становятся значениями фильтров.
-    dispatch(hydrateFilters(initialUrlFiltersRef.current));
-  }, [dispatch]);
+    filtersRef.current = filters;
+  }, [filters]);
 
   useEffect(() => {
-    // Первый рендер ожидает, пока Redux примет значения из URL. Это защищает
-    // query-параметры от перезаписи начальными значениями по умолчанию.
+    const urlFilters = getFiltersFromUrl(new URLSearchParams(queryString), activeCity);
+    urlFiltersRef.current = urlFilters;
+    isHydratingFromUrlRef.current = true;
+
+    if (!areFiltersEqual(filtersRef.current, urlFilters)) {
+      dispatch(hydrateFilters(urlFilters));
+    }
+  }, [activeCity, cityRoute, dispatch, queryString]);
+
+  useEffect(() => {
     if (isHydratingFromUrlRef.current) {
-      if (areFiltersEqual(filters, initialUrlFiltersRef.current)) {
+      if (areFiltersEqual(filters, urlFiltersRef.current)) {
         isHydratingFromUrlRef.current = false;
       }
       return;
@@ -102,11 +131,16 @@ const VacanciesPage = () => {
     if (nextParams.toString() !== queryString) {
       setSearchParams(nextParams, { replace: true });
     }
-  }, [filters, debouncedSearch, queryString, setSearchParams, skillsKey]);
+  }, [debouncedSearch, filters, queryString, setSearchParams, skillsKey]);
 
   useEffect(() => {
     void dispatch(fetchJobs());
   }, [dispatch, filters.search, filters.city, skillsKey, filters.page]);
+
+  const changeCityTab = (value: string | null) => {
+    if (!value || !(value in cityRoutes)) return;
+    navigate(`/vacancies/${value}${location.search}`);
+  };
 
   if (loading && items.length === 0) {
     return (
@@ -155,14 +189,17 @@ const VacanciesPage = () => {
           </Group>
         </Group>
 
+        <Tabs value={cityRoute} onChange={changeCityTab} variant="outline" mb="lg">
+          <Tabs.List>
+            <Tabs.Tab value="moscow">Москва</Tabs.Tab>
+            <Tabs.Tab value="petersburg">Санкт-Петербург</Tabs.Tab>
+          </Tabs.List>
+        </Tabs>
+
         <Group className={styles.mainRow} align="flex-start">
           <Box className={styles.leftColumn}>
             <Filters
-              search={filters.search}
-              city={filters.city}
               skills={filters.skills}
-              onSearchChange={(value) => dispatch(setSearch(value))}
-              onCityChange={(value) => dispatch(setCity(value))}
               onAddSkill={(skill) => dispatch(addSkill(skill))}
               onRemoveSkill={(skill) => dispatch(removeSkill(skill))}
             />
@@ -178,7 +215,7 @@ const VacanciesPage = () => {
                 items.map((job) => <JobCard key={job.id} job={job} />)
               ) : (
                 <Alert color="blue" title="Вакансии не найдены" variant="light">
-                  Попробуйте изменить строку поиска или выбранные фильтры.
+                  Попробуйте изменить строку поиска или выбранные навыки.
                 </Alert>
               )}
             </Stack>
@@ -203,10 +240,14 @@ function App() {
   return (
     <MantineProvider theme={theme}>
       <Routes>
-        <Route path="/" element={<Navigate to="/vacancies" replace />} />
-        <Route path="/vacancies" element={<VacanciesPage />} />
-        <Route path="/vacancies/:id" element={<JobDetailsPage />} />
-        <Route path="*" element={<Navigate to="/vacancies" replace />} />
+        <Route path="/" element={<Navigate to="/vacancies/moscow" replace />} />
+        <Route path="/vacancies">
+          <Route index element={<Navigate to="/vacancies/moscow" replace />} />
+          <Route path="moscow" element={<CityVacanciesPage cityRoute="moscow" />} />
+          <Route path="petersburg" element={<CityVacanciesPage cityRoute="petersburg" />} />
+          <Route path=":id" element={<JobDetailsPage />} />
+        </Route>
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </MantineProvider>
   );

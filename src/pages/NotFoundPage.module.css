@@ -1,0 +1,9 @@
+.page {
+  padding-top: 48px;
+  padding-bottom: 48px;
+}
+
+.content {
+  min-height: 420px;
+  text-align: center;
+}
